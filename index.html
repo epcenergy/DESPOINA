@@ -18,6 +18,8 @@ html,body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-syste
 header{position:sticky;top:0;z-index:5;background:var(--g);color:#fff;padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;display:flex;align-items:center;justify-content:space-between}
 header h1{font-size:18px;margin:0}
 header .hv{font-size:13px;opacity:.9;text-align:right}
+#hshare{border:0;background:rgba(255,255,255,.18);color:#fff;font-size:20px;width:42px;height:42px;border-radius:12px;margin-left:6px}
+#banner .card{background:#fff4d6;border:1px solid #f0c75e;margin:12px 12px 0}
 header .hv b{font-size:16px;display:block}
 main{padding:12px 12px calc(env(safe-area-inset-bottom) + 90px)}
 nav{position:fixed;bottom:0;left:0;right:0;z-index:6;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
@@ -103,9 +105,9 @@ h3{font-size:14px;color:var(--g);margin:14px 0 4px}
 <body>
 <header>
  <h1>🫙 Αποθήκη Τροφίμων</h1>
- <div class="hv">Αξία αποθήκης<b id="hval">0 €</b></div>
+ <div class="row"><div class="hv">Αξία αποθήκης<b id="hval">0 €</b></div><button id="hshare" data-act="shareMenu" aria-label="Κοινοποίηση">📤</button></div>
 </header>
-<main id="main"></main>
+<div id="banner"></div><main id="main"></main>
 <div id="barwrap"></div>
 <nav id="nav">
  <button data-tab="stock" class="on"><span>📦</span>Αποθήκη</button>
@@ -166,6 +168,7 @@ function seed(){
 function load(){try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
  if(!S||!S.cats){S=seed();save()}
  ['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]});
+ if(!S.created){S.created=Date.now();save()}
 }
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){alert('Σφάλμα αποθήκευσης: '+e.message)}}
 const item=id=>S.items.find(i=>i.id===id);
@@ -187,7 +190,28 @@ function hdr(){$('#hval').textContent=eur(stockValue())}
 let TAB='stock',search='',histSeg='del',histPerson='',cart={},giveInfo={person:'',date:today(),note:''};
 function go(t){TAB=t;search='';document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));render();window.scrollTo(0,0)}
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('button');if(b)go(b.dataset.tab)});
-function render(){hdr();$('#barwrap').innerHTML='';({stock:rStock,give:rGive,hist:rHist,count:rCount,set:rSet})[TAB]()}
+function render(){hdr();rBanner();$('#barwrap').innerHTML='';({stock:rStock,give:rGive,hist:rHist,count:rCount,set:rSet})[TAB]()}
+
+// ---------- BACKUP REMINDER ----------
+const DAY=86400000;
+function backupDue(){const last=S.lastBackup||S.created||Date.now();return Date.now()-last>=7*DAY&&!(S.snoozeUntil&&Date.now()<S.snoozeUntil)}
+function rBanner(){const b=$('#banner');if(!backupDue()){b.innerHTML='';return}
+ const days=Math.floor((Date.now()-(S.lastBackup||S.created))/DAY);
+ b.innerHTML=`<div class="card"><b>💾 Ώρα για αντίγραφο ασφαλείας</b><div class="note">${S.lastBackup?'Το τελευταίο έγινε πριν από '+days+' ημέρες.':'Δεν έχεις κάνει ακόμη αντίγραφο.'} Κράτα το στο Drive, στο email ή στο Viber σου.</div>
+ <div class="row"><button class="btn sp" data-act="exp">⬇ Εξαγωγή τώρα</button><button class="btn sec" data-act="snooze">Αύριο</button></div></div>`}
+function backupDone(){S.lastBackup=Date.now();S.snoozeUntil=0;save();rBanner();if(TAB==='set')rSet()}
+function ago(ts){if(!ts)return'ποτέ';const d=Math.floor((Date.now()-ts)/DAY);const dt=new Date(ts);return dGR(dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'))+(d===0?' (σήμερα)':d===1?' (χθες)':' (πριν '+d+' ημέρες)')}
+
+// ---------- SHARE STOCK ----------
+function shareMenu(){
+ openModal(`<h2>📤 Κοινοποίηση αποθήκης</h2><div class="note">Τι υπάρχει τώρα στην αποθήκη, με ποσότητες και αξία.</div>
+ <button class="btn full" style="margin-bottom:8px" data-act="shareStock">💬 Ως κείμενο (Viber, SMS, email…)</button>
+ <button class="btn blue full" style="margin-bottom:8px" data-act="printStock">📄 Ως PDF / Εκτύπωση</button>
+ <label><input type="checkbox" id="shZero" style="width:auto"> Να φαίνονται και όσα έχουν 0</label>
+ <div class="mact"><button class="btn sec" onclick="closeModal()">Κλείσιμο</button></div>`);
+ const z=$('#shZero');z.checked=!!S.shareZero;z.onchange=()=>{S.shareZero=z.checked;save()};
+}
+const shownInShare=i=>S.shareZero||i.stock!==0;
 
 // ---------- STOCK ----------
 function rStock(){
@@ -402,10 +426,10 @@ function rCount(){
 function saveCount(){const ids=Object.keys(countVals).filter(id=>item(id));if(!ids.length){alert('Δεν έγραψες καμία μέτρηση');return}
  let ch=0;ids.forEach(id=>{const i=item(id),n=r3(num(countVals[id])),d=r3(n-i.stock);if(d!==0){i.stock=n;addMove(i,d,'Απογραφή');ch++}});
  save();countVals={};render();toast(ch?'Διορθώθηκαν '+ch+' είδη':'Όλα σωστά ✓')}
-function stockText(){let t='ΑΠΟΘΗΚΗ — '+dGR(today())+'\n';S.cats.forEach(c=>{const its=catItems(c.id,'');if(!its.length)return;t+='\n'+c.name.toUpperCase()+'\n';its.forEach(i=>t+=`• ${i.name}: ${qtyTxt(i,i.stock)} (${eur(val(i,Math.max(0,i.stock)))})\n`)});return t+'\nΣΥΝΟΛΙΚΗ ΑΞΙΑ: '+eur(stockValue())}
+function stockText(){let t='ΑΠΟΘΗΚΗ — '+dGR(today())+'\n';S.cats.forEach(c=>{const its=catItems(c.id,'').filter(shownInShare);if(!its.length)return;t+='\n'+c.name.toUpperCase()+'\n';its.filter(shownInShare).forEach(i=>t+=`• ${i.name}: ${qtyTxt(i,i.stock)} (${eur(val(i,Math.max(0,i.stock)))})\n`)});return t+'\nΣΥΝΟΛΙΚΗ ΑΞΙΑ: '+eur(stockValue())}
 function printStock(){let h=`<h1>Αποθήκη — ${dGR(today())}</h1><table><tr><th>Κατηγορία</th><th>Είδος</th><th>Συσκευασία</th><th class="r">Απόθεμα</th><th class="r">Τιμή</th><th class="r">Αξία</th><th>Μέτρηση</th></tr>`;
- S.cats.forEach(c=>catItems(c.id,'').forEach(i=>h+=`<tr><td>${esc(c.name)}</td><td>${esc(i.name)}</td><td>${esc(i.pack)}</td><td class="r">${qtyTxt(i,i.stock)}</td><td class="r">${priceLbl(i)}</td><td class="r">${eur(val(i,Math.max(0,i.stock)))}</td><td style="width:70px"></td></tr>`));
- h+=`<tr><td colspan="5"><b>ΣΥΝΟΛΟ</b></td><td class="r"><b>${eur(stockValue())}</b></td><td></td></tr></table>`;$('#print').innerHTML=h;setTimeout(()=>window.print(),50)}
+ S.cats.forEach(c=>catItems(c.id,'').filter(shownInShare).forEach(i=>h+=`<tr><td>${esc(c.name)}</td><td>${esc(i.name)}</td><td>${esc(i.pack)}</td><td class="r">${qtyTxt(i,i.stock)}</td><td class="r">${priceLbl(i)}</td><td class="r">${eur(val(i,Math.max(0,i.stock)))}</td><td style="width:70px"></td></tr>`));
+ h+=`<tr><td colspan="5"><b>ΣΥΝΟΛΟ</b></td><td class="r"><b>${eur(stockValue())}</b></td><td></td></tr></table>`;$('#print').innerHTML=h;closeModal();setTimeout(()=>window.print(),80)}
 
 // ---------- SETTINGS ----------
 function rSet(){
@@ -416,13 +440,13 @@ function rSet(){
  <div class="card"><b>Άτομα</b><div class="note">Προστίθενται αυτόματα όταν δίνεις κάτι.</div>
  ${S.people.length?S.people.map((p,ix)=>`<div class="li"><span>${esc(p)}</span><button class="btn red sm" data-act="pDel" data-ix="${ix}">✕</button></div>`).join(''):'<div class="note">Κανένα ακόμη.</div>'}
  <button class="btn sec full" style="margin-top:10px" data-act="pAdd">+ Νέο άτομο</button></div>
- <div class="card"><b>Αντίγραφο ασφαλείας</b><div class="note">Τα δεδομένα μένουν μόνο σε αυτό το κινητό. Κράτα συχνά αντίγραφο (π.χ. στο Drive ή στο Viber σου).</div>
+ <div class="card"><b>Αντίγραφο ασφαλείας</b><div class="note">Τα δεδομένα μένουν μόνο σε αυτό το κινητό. Η εφαρμογή σού το θυμίζει μία φορά την εβδομάδα.<br>Τελευταίο αντίγραφο: <b>${ago(S.lastBackup)}</b></div>
  <div class="row"><button class="btn sp" data-act="exp">⬇ Εξαγωγή</button><button class="btn sec sp" data-act="imp">⬆ Επαναφορά</button></div></div>
- <div class="card"><button class="btn red full" data-act="wipe">Διαγραφή όλων των δεδομένων</button><div class="note" style="text-align:center;margin-top:10px">Αποθήκη Τροφίμων · v1.0</div></div>`;
+ <div class="card"><button class="btn red full" data-act="wipe">Διαγραφή όλων των δεδομένων</button><div class="note" style="text-align:center;margin-top:10px">Αποθήκη Τροφίμων · v1.1</div></div>`;
 }
 function exportData(){const txt=JSON.stringify(S,null,1);const name='apothiki-'+today()+'.json';
- try{const f=new File([txt],name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f],title:name}).catch(()=>{});return}}catch(e){}
- const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/json'}));a.download=name;document.body.appendChild(a);a.click();a.remove();toast('Αποθηκεύτηκε '+name)}
+ try{const f=new File([txt],name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f],title:name}).then(()=>{backupDone();toast('Το αντίγραφο στάλθηκε ✓')}).catch(()=>{});return}}catch(e){}
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/json'}));a.download=name;document.body.appendChild(a);a.click();a.remove();backupDone();toast('Αποθηκεύτηκε '+name)}
 $('#impfile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.cats||!d.items)throw 0;if(confirm('Να αντικατασταθούν τα τωρινά δεδομένα με το αντίγραφο;')){S=d;load2();save();render();toast('Έγινε επαναφορά')}}catch(x){alert('Μη έγκυρο αρχείο')}e.target.value=''};r.readAsText(f)};
 function load2(){['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]})}
 
@@ -450,6 +474,8 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
   case'pAdd':{const n=prompt('Όνομα:');if(n){addPerson(n);save();render()}break}
   case'pDel':{const ix=+el.dataset.ix;if(confirm('Διαγραφή «'+S.people[ix]+'» από τη λίστα; (Το ιστορικό μένει)')){S.people.splice(ix,1);save();render()}break}
   case'exp':exportData();break;
+  case'snooze':S.snoozeUntil=Date.now()+DAY;save();rBanner();toast('Θα σου το θυμίσω αύριο');break;
+  case'shareMenu':shareMenu();break;
   case'imp':$('#impfile').click();break;
   case'wipe':if(confirm('Θα σβηστούν ΟΛΑ (είδη, ιστορικό, άτομα). Σίγουρα;')&&confirm('Τελευταία επιβεβαίωση: διαγραφή όλων;')){S=seed();save();cart={};render();toast('Διαγράφηκαν')}break;
  }});
