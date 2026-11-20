@@ -16,10 +16,11 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:16px}
 header{position:sticky;top:0;z-index:5;background:var(--g);color:#fff;padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;display:flex;align-items:center;justify-content:space-between}
-header h1{font-size:18px;margin:0}
+header h1{font-size:18px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;margin-right:8px}
 header .hv{font-size:13px;opacity:.9;text-align:right}
 #hshare{border:0;background:rgba(255,255,255,.18);color:#fff;font-size:20px;width:42px;height:42px;border-radius:12px;margin-left:6px}
 #banner .card{background:#fff4d6;border:1px solid #f0c75e;margin:12px 12px 0}
+@media (max-width:400px){.h1x{display:none}}
 header .hv b{font-size:16px;display:block}
 main{padding:12px 12px calc(env(safe-area-inset-bottom) + 90px)}
 nav{position:fixed;bottom:0;left:0;right:0;z-index:6;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
@@ -97,7 +98,7 @@ h3{font-size:14px;color:var(--g);margin:14px 0 4px}
 </head>
 <body>
 <header>
- <h1>🫙 Αποθήκη Τροφίμων</h1>
+ <h1>🫙 Αποθήκη<span class="h1x"> Τροφίμων</span></h1>
  <div class="row"><div class="hv">Αξία αποθήκης<b id="hval">0 €</b></div><button id="hshare" data-act="stockPDF" aria-label="PDF αποθήκης">📤</button></div>
 </header>
 <div id="banner"></div><main id="main"></main>
@@ -111,7 +112,7 @@ h3{font-size:14px;color:var(--g);margin:14px 0 4px}
 </nav>
 <div id="modal"><div id="mbody"></div></div>
 <div id="toast"></div>
-<input type="file" id="impfile" accept=".json,application/json" style="display:none">
+<input type="file" id="impfile" style="display:none">
 
 <script>
 "use strict";
@@ -131,7 +132,12 @@ const MONTHS=['Ιανουάριος','Φεβρουάριος','Μάρτιος','
 
 const $=s=>document.querySelector(s);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-const num=v=>{const n=parseFloat(String(v==null?'':v).replace(/\s/g,'').replace(',','.'));return isFinite(n)?n:0};
+const num=v=>{let s=String(v==null?'':v).replace(/[\s €]/g,'');if(!s)return 0;
+ if(s.includes(',')){s=s.replace(/\./g,'').replace(',','.')}else if((s.match(/\./g)||[]).length>1){s=s.replace(/\./g,'')}
+ const n=parseFloat(s);return isFinite(n)?n:0};
+const fmtIn=n=>{n=Math.round((+n||0)*1000)/1000;return n?String(n).replace('.',','):''};
+const norm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/ς/g,'σ').trim();
+const plural=(n,a,b)=>Math.abs(n)===1?a:b;
 const r3=n=>Math.round(n*1000)/1000;
 const fmtN=n=>(+n).toLocaleString('el-GR',{maximumFractionDigits:3});
 const eur=n=>(+n||0).toLocaleString('el-GR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
@@ -157,22 +163,38 @@ function seed(){
   it(cme,'Μέλι','jar')
  ],people:[],deliveries:[],moves:[]};
 }
-function load(){try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
- if(!S||!S.cats){S=seed();save()}
+function normalize(){
  ['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]});
- if(!S.created){S.created=Date.now();save()}
- if(!S.biz)S.biz={name:'',phone:'',addr:''};
- if(S.deliveries.some(d=>!d.no)){const ord=S.deliveries.slice().sort((a,b)=>a.ts-b.ts);let n=0;ord.forEach(d=>{if(d.no)n=Math.max(n,d.no)});ord.forEach(d=>{if(!d.no)d.no=++n});S.seq=Math.max(S.seq||0,n);save()}
+ if(!S.created)S.created=Date.now();
+ if(!S.biz||typeof S.biz!=='object')S.biz={};['name','phone','addr'].forEach(k=>{if(typeof S.biz[k]!=='string')S.biz[k]=''});
+ S.cats=S.cats.filter(c=>c&&c.id);S.cats.forEach(c=>c.name=String(c.name||'Κατηγορία'));
+ S.items=S.items.filter(i=>i&&i.id);
+ S.items.forEach(i=>{i.name=String(i.name||'Χωρίς όνομα');if(!UNITS.some(u=>u.k===i.unit))i.unit='pcs';i.pack=String(i.pack||'');
+  i.price=+i.price||0;i.stock=r3(+i.stock||0);i.min=+i.min||0;
+  if(!S.cats.some(c=>c.id===i.catId)){let o=S.cats.find(c=>c.name==='Χωρίς κατηγορία');if(!o){o={id:uid(),name:'Χωρίς κατηγορία'};S.cats.push(o)}i.catId=o.id}});
+ S.people=[...new Set(S.people.filter(p=>typeof p==='string'&&p.trim()).map(p=>p.trim()))];
+ S.deliveries=S.deliveries.filter(d=>d&&Array.isArray(d.lines));
+ S.deliveries.forEach(d=>{if(!d.id)d.id=uid();if(!d.ts)d.ts=Date.now();if(!/^\d{4}-\d{2}-\d{2}$/.test(d.date||''))d.date=today();d.person=String(d.person||'—');d.note=String(d.note||'');
+  d.lines.forEach(l=>{l.qty=+l.qty||0;l.price=+l.price||0;l.total=+l.total||0;if(!UNITS.some(u=>u.k===l.unit))l.unit='pcs'});d.total=Math.round(d.lines.reduce((s,l)=>s+l.total,0)*100)/100});
+ S.moves=S.moves.filter(m=>m&&m.date);
+ const ord=S.deliveries.slice().sort((a,b)=>a.ts-b.ts);let n=0;ord.forEach(d=>{if(d.no)n=Math.max(n,d.no)});ord.forEach(d=>{if(!d.no)d.no=++n});S.seq=Math.max(S.seq||0,n);
+}
+function load(){try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
+ if(!S||typeof S!=='object'||!Array.isArray(S.cats))S=seed();
+ normalize();save();
+ try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 }
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){alert('Σφάλμα αποθήκευσης: '+e.message)}}
 const item=id=>S.items.find(i=>i.id===id);
 const cat=id=>S.cats.find(c=>c.id===id);
 const sortName=(a,b)=>a.name.localeCompare(b.name,'el');
-function catItems(cid,q){q=(q||'').trim().toLowerCase();
- return S.items.filter(i=>i.catId===cid&&(!q||i.name.toLowerCase().includes(q)||(cat(cid)||{name:''}).name.toLowerCase().includes(q))).sort(sortName)}
+function catItems(cid,q){q=norm(q);const cn=norm((cat(cid)||{name:''}).name);
+ return S.items.filter(i=>i.catId===cid&&(!q||norm(i.name).includes(q)||norm(i.pack).includes(q)||cn.includes(q))).sort(sortName)}
 function stockValue(){return S.items.reduce((s,i)=>s+val(i,Math.max(0,i.stock)),0)}
 function addMove(it,delta,type,note,date){S.moves.push({id:uid(),ts:Date.now(),date:date||today(),itemId:it.id,name:it.name,unit:it.unit,delta:r3(delta),type,note:note||''})}
-function addPerson(n){n=(n||'').trim();if(n&&!S.people.some(p=>p.toLowerCase()===n.toLowerCase())){S.people.push(n);S.people.sort((a,b)=>a.localeCompare(b,'el'))}}
+function canonPerson(n){n=String(n||'').replace(/\s+/g,' ').trim();if(!n)return'';const all=S.people.concat(S.deliveries.map(d=>d.person));const f=all.find(p=>norm(p)===norm(n));return f||n}
+function addPerson(n){n=canonPerson(n);if(n&&!S.people.some(p=>norm(p)===norm(n))){S.people.push(n);S.people.sort((a,b)=>a.localeCompare(b,'el'))}return n}
+function allPeople(){const s=new Map();S.people.concat(S.deliveries.map(d=>d.person)).forEach(p=>{if(p&&!s.has(norm(p)))s.set(norm(p),p)});return[...s.values()].sort((a,b)=>a.localeCompare(b,'el'))}
 
 // ---------- ui helpers ----------
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),1800)}
@@ -203,11 +225,22 @@ const PF='-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif';
 function pfit(x,s,max){s=String(s);if(x.measureText(s).width<=max)return s;while(s.length>1&&x.measureText(s+'…').width>max)s=s.slice(0,-1);return s+'…'}
 function ptxt(x,s,X,Y,o){o=o||{};x.font=(o.b?'700 ':'400 ')+(o.s||20)+'px '+PF;x.fillStyle=o.c||PC.tx;x.textAlign=o.al||'left';x.textBaseline='alphabetic';x.fillText(o.max?pfit(x,s,o.max):s,X,Y)}
 function prr(x,X,Y,w,h,r,fill){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);x.arcTo(X+w,Y+h,X,Y+h,r);x.arcTo(X,Y+h,X,Y,r);x.arcTo(X,Y,X+w,Y,r);x.closePath();x.fillStyle=fill;x.fill()}
+const MC=document.createElement('canvas').getContext('2d');
+function Rec(){const ops=[],r={ops};
+ ['font','fillStyle','textAlign','textBaseline'].forEach(pn=>Object.defineProperty(r,pn,{set(v){ops.push([0,pn,v]);MC[pn]=v},get(){return MC[pn]}}));
+ ['fillText','fillRect','beginPath','moveTo','arcTo','closePath','fill'].forEach(m=>r[m]=(...a)=>ops.push([1,m,a]));
+ r.measureText=s=>MC.measureText(s);return r}
+let RC=null;
+function renderPage(rec){if(!RC){RC=document.createElement('canvas');RC.width=Math.round(PW*PSC);RC.height=Math.round(PH*PSC)}
+ const x=RC.getContext('2d');x.setTransform(1,0,0,1,0,0);x.fillStyle='#fff';x.fillRect(0,0,RC.width,RC.height);x.setTransform(PSC,0,0,PSC,0,0);
+ rec.ops.forEach(o=>{if(o[0]===0)x[o[1]]=o[2];else x[o[1]](...o[2])});
+ const url=RC.toDataURL('image/jpeg',0.9),bin=atob(url.split(',')[1]),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
+ return{b:a,w:RC.width,h:RC.height,url}}
 function nowTxt(){const d=new Date();return dGR(today())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 function PDoc(title,subtitle){
  const d={pages:[],title,subtitle,biz:S.biz||{}};
  const bizName=()=>d.biz.name||'Αποθήκη Τροφίμων';
- d.add=()=>{const c=document.createElement('canvas');c.width=Math.round(PW*PSC);c.height=Math.round(PH*PSC);const x=c.getContext('2d');x.scale(PSC,PSC);x.fillStyle='#fff';x.fillRect(0,0,PW,PH);d.pages.push(c);d.x=x;
+ d.add=()=>{const x=Rec();d.pages.push(x);d.x=x;
   if(d.pages.length===1){x.fillStyle=PC.g;x.fillRect(0,0,PW,160);
    let fs=36;x.font='700 36px '+PF;while(fs>24&&x.measureText(bizName()).width>650){fs-=2;x.font='700 '+fs+'px '+PF}
    ptxt(x,bizName(),PM,72,{s:fs,b:1,c:'#fff',max:650});
@@ -235,15 +268,14 @@ function PDoc(title,subtitle){
   d.y+=26};
  d.note=t=>{if(!t)return;d.need(60);ptxt(d.x,t,PM,d.y+24,{s:19,c:PC.mut,max:PW-2*PM});d.y+=44};
  d.total=(l,v)=>{d.need(110);const x=d.x,w=520,X=PW-PM-w;prr(x,X,d.y,w,92,12,PC.g);ptxt(x,l,X+24,d.y+56,{s:21,b:1,c:'#d5e3d8'});ptxt(x,v,X+w-24,d.y+60,{s:38,b:1,c:'#fff',al:'right'});d.y+=92+20};
- d.finish=()=>{const n=d.pages.length;d.pages.forEach((c,i)=>{const x=c.getContext('2d');x.fillStyle=PC.line;x.fillRect(PM,PH-64,PW-2*PM,1);
+ d.finish=()=>{const n=d.pages.length;d.pages.forEach((x,i)=>{x.fillStyle=PC.line;x.fillRect(PM,PH-64,PW-2*PM,1);
    ptxt(x,'Δημιουργήθηκε '+nowTxt(),PM,PH-34,{s:16,c:PC.mut});ptxt(x,'Σελίδα '+(i+1)+' από '+n,PW-PM,PH-34,{s:16,c:PC.mut,al:'right'})});return d.pages};
  d.add();return d;
 }
-function pdfBlob(canvases){
+function pdfBlob(imgs){
  const enc=new TextEncoder(),parts=[],offs=[];let len=0;
  const push=b=>{if(typeof b==='string')b=enc.encode(b);parts.push(b);len+=b.length};
  const obj=(i,s)=>{offs[i]=len;push(i+' 0 obj\n'+s)};
- const imgs=canvases.map(c=>{const u=c.toDataURL('image/jpeg',0.9),bin=atob(u.split(',')[1]),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return{b:a,w:c.width,h:c.height}});
  const n=imgs.length,tot=2+3*n;
  push('%PDF-1.4\n%âãÏÓ\n');
  obj(1,'<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
@@ -261,11 +293,12 @@ const fileSafe=s=>String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,'_');
 function showPDF(doc,fname){
  toast('Δημιουργία PDF…');
  setTimeout(()=>{
-  const pages=doc.finish();const blob=pdfBlob(pages);
+  let pages;try{pages=doc.finish().map(renderPage)}catch(e){alert('Δεν δημιουργήθηκε το PDF: '+e.message);return}
+  const blob=pdfBlob(pages);
   if(curPDF&&curPDF.url)URL.revokeObjectURL(curPDF.url);
   curPDF={blob,name:fileSafe(fname)+'.pdf',url:URL.createObjectURL(blob)};
   openModal(`<h2>📄 ${esc(curPDF.name)}</h2><div class="note">${pages.length} ${pages.length===1?'σελίδα':'σελίδες'}</div>
-  <div style="max-height:52vh;overflow:auto;background:#e8e5da;border-radius:10px;padding:8px">${pages.map(c=>`<img src="${c.toDataURL('image/jpeg',0.7)}" style="width:100%;display:block;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.2)">`).join('')}</div>
+  <div style="max-height:52vh;overflow:auto;background:#e8e5da;border-radius:10px;padding:8px">${pages.map(pg=>`<img src="${pg.url}" style="width:100%;display:block;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.2)">`).join('')}</div>
   <div class="mact"><button class="btn sec" onclick="closeModal()">Κλείσιμο</button><button class="btn sec" data-act="openPDF">Άνοιγμα</button><button class="btn" data-act="sharePDF">📤 Αποστολή</button></div>`);
  },30);
 }
@@ -281,7 +314,7 @@ function stockPDF(){
  const low=S.items.filter(i=>i.min>0&&i.stock<=i.min).length;
  d.boxes([{l:'Είδη',v:String(S.items.length)},{l:'Κατηγορίες',v:String(used.length)},{l:'Λίγα / τελειώνουν',v:String(low),c:low?PC.red:PC.g},{l:'Συνολική αξία',v:eur(stockValue())}]);
  used.forEach(c=>{const its=catItems(c.id,'');const cv=its.reduce((s,i)=>s+val(i,Math.max(0,i.stock)),0);
-  d.heading(c.name,its.length+' είδη  ·  '+eur(cv));
+  d.heading(c.name,its.length+' '+plural(its.length,'είδος','είδη')+'  ·  '+eur(cv));
   d.table([{t:'ΕΙΔΟΣ',w:.44},{t:'ΑΠΟΘΕΜΑ',w:.18,al:'r'},{t:'ΤΙΜΗ',w:.2,al:'r'},{t:'ΑΞΙΑ',w:.18,al:'r'}],
    its.map(i=>{const lw=i.min>0&&i.stock<=i.min;return{c:[i.name,qtyTxt(i,i.stock),priceLbl(i),eur(val(i,Math.max(0,i.stock)))],sub:i.pack||null,bold:[0,1],col:{1:lw?PC.red:(i.stock===0?PC.mut:PC.tx)}}}))});
  d.total('ΣΥΝΟΛΙΚΗ ΑΞΙΑ',eur(stockValue()));
@@ -296,22 +329,33 @@ function delPDF(dl){
  d.total('ΣΥΝΟΛΟ',eur(dl.total));
  showPDF(d,'Παραγγελία_'+(dl.no?dl.no+'_':'')+dl.person+'_'+dGR(dl.date).replace(/\//g,'-'));
 }
-function monthPDF(k){
- const ds=S.deliveries.filter(x=>x.date.slice(0,7)===k&&(!histPerson||x.person===histPerson)).sort((a,b)=>(a.date+a.ts).localeCompare(b.date+b.ts));
- const[y,m]=k.split('-');const tot=ds.reduce((s,x)=>s+x.total,0);
- const d=PDoc('Παραδόσεις μήνα',MONTHS[+m-1]+' '+y+(histPerson?'  ·  '+histPerson:''));
- const pi={},pp={};ds.forEach(x=>{const o=pp[x.person]=pp[x.person]||{n:0,t:0};o.n++;o.t+=x.total;x.lines.forEach(l=>{const kk=l.name+'|'+l.unit;const q=pi[kk]=pi[kk]||{name:l.name,unit:l.unit,q:0,t:0};q.q+=l.qty;q.t+=l.total})});
- d.boxes([{l:'Παραδόσεις',v:String(ds.length)},{l:'Άτομα',v:String(Object.keys(pp).length)},{l:'Σύνολο μήνα',v:eur(tot)}]);
+function periodPDF(kind,key){
+ const inP=x=>kind==='all'||(kind==='y'?x.date.slice(0,4)===key:x.date.slice(0,7)===key);
+ const ds=S.deliveries.filter(x=>inP(x)&&(!histPerson||x.person===histPerson)).sort((a,b)=>(a.date+a.ts).localeCompare(b.date+b.ts));
+ const tot=ds.reduce((s,x)=>s+x.total,0);
+ let title,sub,fn;
+ if(kind==='m'){const[y,m]=key.split('-');title='Παραδόσεις μήνα';sub=MONTHS[+m-1]+' '+y;fn='Παραδόσεις_'+MONTHS[+m-1]+'_'+y}
+ else if(kind==='y'){title='Παραδόσεις έτους';sub='Έτος '+key;fn='Παραδόσεις_'+key}
+ else{title='Όλες οι παραδόσεις';sub=ds.length?dGR(ds[0].date)+' – '+dGR(today()):'έως '+dGR(today());fn='Παραδόσεις_ως_'+dGR(today()).replace(/\//g,'-')}
+ if(histPerson){sub+='  ·  '+histPerson;fn+='_'+histPerson}
+ const d=PDoc(title,sub);
+ const pi={},pp={},pm={};ds.forEach(x=>{const o=pp[x.person]=pp[x.person]||{n:0,t:0};o.n++;o.t+=x.total;
+  const mk=x.date.slice(0,7),mo=pm[mk]=pm[mk]||{n:0,t:0};mo.n++;mo.t+=x.total;
+  x.lines.forEach(l=>{const kk=l.name+'|'+l.unit;const q=pi[kk]=pi[kk]||{name:l.name,unit:l.unit,q:0,t:0};q.q+=l.qty;q.t+=l.total})});
+ d.boxes([{l:'Παραδόσεις',v:String(ds.length)},{l:'Άτομα',v:String(Object.keys(pp).length)},{l:kind==='m'?'Σύνολο μήνα':kind==='y'?'Σύνολο έτους':'Σύνολο',v:eur(tot)}]);
+ if(kind!=='m'){d.heading('Ανά μήνα');
+  d.table([{t:'ΜΗΝΑΣ',w:.56},{t:'ΠΑΡΑΔΟΣΕΙΣ',w:.22,al:'r'},{t:'ΣΥΝΟΛΟ',w:.22,al:'r'}],Object.keys(pm).sort().map(k=>{const[y,m]=k.split('-');return{c:[MONTHS[+m-1]+' '+y,String(pm[k].n),eur(pm[k].t)],bold:[0,2]}}))}
  d.heading('Ανά είδος');
  d.table([{t:'ΕΙΔΟΣ',w:.56},{t:'ΠΟΣΟΤΗΤΑ',w:.22,al:'r'},{t:'ΑΞΙΑ',w:.22,al:'r'}],Object.values(pi).sort((a,b)=>b.t-a.t).map(o=>({c:[o.name,fmtN(r3(o.q))+' '+U(o.unit).p,eur(o.t)],bold:[0,2]})));
  if(!histPerson){d.heading('Ανά άτομο');
   d.table([{t:'ΑΤΟΜΟ',w:.56},{t:'ΠΑΡΑΔΟΣΕΙΣ',w:.22,al:'r'},{t:'ΣΥΝΟΛΟ',w:.22,al:'r'}],Object.entries(pp).sort((a,b)=>b[1].t-a[1].t).map(([p,o])=>({c:[p,String(o.n),eur(o.t)],bold:[0,2]})))}
  d.heading('Αναλυτικά');
  d.table([{t:'ΗΜΕΡΟΜΗΝΙΑ',w:.2},{t:'ΑΡ.',w:.1,al:'c'},{t:'ΑΤΟΜΟ',w:.34},{t:'ΕΙΔΗ',w:.14,al:'r'},{t:'ΣΥΝΟΛΟ',w:.22,al:'r'}],
-  ds.map(x=>({c:[dGR(x.date),String(x.no||''),x.person,String(x.lines.length),eur(x.total)],sub:null,bold:[2,4]})));
- d.total('ΣΥΝΟΛΟ ΜΗΝΑ',eur(tot));
- showPDF(d,'Παραδόσεις_'+MONTHS[+m-1]+'_'+y+(histPerson?'_'+histPerson:''));
+  ds.map(x=>({c:[dGR(x.date),String(x.no||''),x.person,String(x.lines.length),eur(x.total)],bold:[2,4]})));
+ d.total(kind==='m'?'ΣΥΝΟΛΟ ΜΗΝΑ':kind==='y'?'ΣΥΝΟΛΟ ΕΤΟΥΣ':'ΓΕΝΙΚΟ ΣΥΝΟΛΟ',eur(tot));
+ showPDF(d,fn);
 }
+
 
 // ---------- STOCK ----------
 function rStock(){
@@ -320,7 +364,7 @@ function rStock(){
  <div class="card sum">
   <div><b>${S.items.length}</b><small>είδη</small></div>
   <div><b>${eur(stockValue())}</b><small>αξία</small></div>
-  <div><b class="${low?'low':''}">${low}</b><small>λίγα / τελειώνουν</small></div>
+  <div><b class="${low?'low':''}">${low}</b><small>τελειώνουν</small></div>
  </div>
  <div class="row" style="margin-bottom:10px">
   <input class="sp" id="q" placeholder="🔍 Αναζήτηση..." value="${esc(search)}">
@@ -334,7 +378,7 @@ function rStockList(){
  let h='';
  S.cats.forEach(c=>{const its=catItems(c.id,search);if(search&&!its.length)return;
   const cv=its.reduce((s,i)=>s+val(i,Math.max(0,i.stock)),0);
-  h+=`<div class="cat"><div class="cath"><span>${esc(c.name)}</span><small>${its.length} είδη · ${eur(cv)}</small></div>`;
+  h+=`<div class="cat"><div class="cath"><span>${esc(c.name)}</span><small>${its.length} ${plural(its.length,'είδος','είδη')} · ${eur(cv)}</small></div>`;
   if(!its.length)h+=`<div class="note" style="padding:0 4px">Κανένα είδος ακόμη. <a href="#" data-act="newItem" data-cat="${c.id}">Πρόσθεσε</a></div>`;
   its.forEach(i=>{const lw=i.min>0&&i.stock<=i.min;
    h+=`<div class="item"><div class="info" data-act="editItem" data-id="${i.id}"><b>${esc(i.name)}</b><small>${i.pack?esc(i.pack)+' · ':''}${priceLbl(i)}</small></div>
@@ -356,18 +400,24 @@ function itemForm(it,catId){
  <label>Μονάδα μέτρησης στην αποθήκη</label>
  <select id="fUnit">${UNITS.map(u=>`<option value="${u.k}" ${u.k===it.unit?'selected':''}>${u.p}</option>`).join('')}</select>
  <label>Συσκευασία (προαιρετικό, π.χ. «βάζο 450 γρ.», «κιβώτιο 12 τεμ.»)</label><input id="fPack" value="${esc(it.pack)}">
- <div class="row"><div class="sp"><label id="fPriceL">Τιμή (€)</label><input id="fPrice" inputmode="decimal" value="${it.price?fmtN(it.price):''}" placeholder="0,00"></div>
- <div class="sp"><label>${isNew?'Υπάρχουν τώρα':'Απόθεμα'}</label><input id="fStock" inputmode="decimal" value="${it.stock?fmtN(it.stock):''}" placeholder="0" ${isNew?'':'disabled'}></div></div>
+ <div class="row"><div class="sp"><label id="fPriceL">Τιμή (€)</label><input id="fPrice" inputmode="decimal" value="${fmtIn(it.price)}" placeholder="0,00"></div>
+ <div class="sp"><label>${isNew?'Υπάρχουν τώρα':'Απόθεμα'}</label><input id="fStock" inputmode="decimal" value="${fmtIn(it.stock)}" placeholder="0" ${isNew?'':'disabled'}></div></div>
  ${isNew?'':'<div class="note">Το απόθεμα αλλάζει με + / − ή από την Απογραφή, ώστε να γράφεται στις κινήσεις.</div>'}
- <label>Ειδοποίηση όταν πέσει κάτω από (προαιρετικό)</label><input id="fMin" inputmode="decimal" value="${it.min?fmtN(it.min):''}" placeholder="0 = χωρίς ειδοποίηση">
+ <label>Ειδοποίηση όταν πέσει κάτω από (προαιρετικό)</label><input id="fMin" inputmode="decimal" value="${fmtIn(it.min)}" placeholder="0 = χωρίς ειδοποίηση">
  <div class="mact">${isNew?'':'<button class="btn red" id="fDel">Διαγραφή</button>'}<button class="btn sec" onclick="closeModal()">Άκυρο</button><button class="btn" id="fSave">Αποθήκευση</button></div>`);
  const upd=()=>{const u=U($('#fUnit').value);$('#fPriceL').textContent='Τιμή (€ ανά '+(u.per||u.s)+')'};upd();$('#fUnit').onchange=upd;
  $('#fNewCat').onclick=()=>{const n=prompt('Όνομα νέας κατηγορίας:');if(n&&n.trim()){const c={id:uid(),name:n.trim()};S.cats.push(c);save();const o=document.createElement('option');o.value=c.id;o.textContent=c.name;$('#fCat').appendChild(o);$('#fCat').value=c.id}};
- $('#fSave').onclick=()=>{const name=$('#fName').value.trim();if(!name){alert('Γράψε όνομα');return}
+ $('#fSave').onclick=()=>{if($('#fSave').disabled)return;const name=$('#fName').value.trim();if(!name){alert('Γράψε όνομα');return}
   const d={catId:$('#fCat').value,name,unit:$('#fUnit').value,pack:$('#fPack').value.trim(),price:num($('#fPrice').value),min:num($('#fMin').value)};
+  if(!d.catId||!cat(d.catId)){alert('Φτιάξε πρώτα μια κατηγορία (κουμπί «+ Νέα»)');return}
+  if(S.items.some(x=>x!==it&&x.catId===d.catId&&norm(x.name)===norm(name))&&!confirm('Υπάρχει ήδη «'+name+'» σε αυτή την κατηγορία. Να γίνει και δεύτερο;'))return;
+  if(!isNew&&d.unit!==it.unit&&it.stock){const a=it.unit,b=d.unit;
+   if(a==='g'&&b==='kg'){if(!confirm('Αλλαγή από γραμμάρια σε κιλά: το απόθεμα '+qtyTxt(it,it.stock)+' θα γίνει '+fmtN(r3(it.stock/1000))+' κιλά. Συνέχεια;'))return;it.stock=r3(it.stock/1000)}
+   else if(a==='kg'&&b==='g'){if(!confirm('Αλλαγή από κιλά σε γραμμάρια: το απόθεμα '+qtyTxt(it,it.stock)+' θα γίνει '+fmtN(r3(it.stock*1000))+' γρ. Συνέχεια;'))return;it.stock=r3(it.stock*1000)}
+   else if(!confirm('Αλλάζεις μονάδα από «'+U(a).p+'» σε «'+U(b).p+'». Ο αριθμός του αποθέματος ('+fmtN(it.stock)+') μένει ίδιος. Αν δεν είναι σωστός, διόρθωσέ τον μετά από την Απογραφή. Συνέχεια;'))return}
   if(isNew){const n=Object.assign({id:uid(),stock:0},d);S.items.push(n);const st=num($('#fStock').value);if(st){n.stock=r3(st);addMove(n,st,'Αρχικό απόθεμα')}}
   else Object.assign(it,d);
-  save();closeModal();render();toast('Αποθηκεύτηκε')};
+  $('#fSave').disabled=true;save();closeModal();render();toast('Αποθηκεύτηκε')};
  if(!isNew)$('#fDel').onclick=()=>{if(confirm('Διαγραφή του «'+it.name+'»; Το ιστορικό παραδόσεων μένει.')){S.items=S.items.filter(x=>x.id!==it.id);save();closeModal();render();toast('Διαγράφηκε')}};
 }
 
@@ -391,21 +441,22 @@ function adjForm(it,mode){
  const showV=()=>{const q=num($('#aQ').value);$('#aVal').textContent='Αξία: '+eur(val(it,q))+' → θα μείνουν '+qtyTxt(it,r3(it.stock+(mode==='in'?q:-q)))};
  document.querySelectorAll('#mbody .seg button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;why()});
  $('#aQ').oninput=showV;
- $('#aM').onclick=()=>{$('#aQ').value=fmtN(Math.max(0,r3(num($('#aQ').value)-u.step)));showV()};
- $('#aP').onclick=()=>{$('#aQ').value=fmtN(r3(num($('#aQ').value)+u.step));showV()};
+ $('#aM').onclick=()=>{$('#aQ').value=fmtIn(Math.max(0,r3(num($('#aQ').value)-u.step)));showV()};
+ $('#aP').onclick=()=>{$('#aQ').value=fmtIn(r3(num($('#aQ').value)+u.step));showV()};
  why();
- $('#aOk').onclick=()=>{const q=num($('#aQ').value);if(q<=0){alert('Βάλε ποσότητα');return}
+ $('#aOk').onclick=()=>{if($('#aOk').disabled)return;const q=num($('#aQ').value);if(q<=0){alert('Βάλε ποσότητα');return}
   const date=$('#aD').value||today(),r=$('#aR').value;
   if(mode==='out'&&q>it.stock&&!confirm('Δεν υπάρχουν τόσα ('+qtyTxt(it,it.stock)+'). Να γίνει παρόλα αυτά;'))return;
   if(mode==='out'&&r==='give'){const per=$('#aPer').value.trim();if(!per){alert('Γράψε σε ποιον τα έδωσες');return}
-   saveDelivery(per,date,'',[{it,q}]);closeModal();render();toast('Καταγράφηκε: '+qtyTxt(it,q)+' σε '+per);return}
-  it.stock=r3(it.stock+(mode==='in'?q:-q));addMove(it,mode==='in'?q:-q,r,'',date);save();closeModal();render();toast('OK')};
+   $('#aOk').disabled=true;const dd=saveDelivery(per,date,'',[{it,q}]);closeModal();render();toast('Καταγράφηκε: '+qtyTxt(it,q)+' σε '+dd.person);return}
+  $('#aOk').disabled=true;it.stock=r3(it.stock+(mode==='in'?q:-q));addMove(it,mode==='in'?q:-q,r,'',date);save();closeModal();render();toast('OK')};
 }
 
 // ---------- GIVE ----------
 function cartLines(){return Object.entries(cart).map(([id,q])=>({it:item(id),q})).filter(l=>l.it&&l.q>0)}
 function cartTotal(){return cartLines().reduce((s,l)=>s+val(l.it,l.q),0)}
 function rGive(){
+ if(!cartLines().length&&!giveInfo.person&&!giveInfo.dateSet)giveInfo.date=today();
  $('#main').innerHTML=`
  <div class="card">
   <label style="margin-top:0">Σε ποιον δίνεις;</label>
@@ -416,7 +467,7 @@ function rGive(){
  <input class="search" id="gq" placeholder="🔍 Αναζήτηση είδους..." value="${esc(search)}">
  <div id="glist"></div><div style="height:80px"></div>`;
  $('#gP').oninput=e=>giveInfo.person=e.target.value;
- $('#gD').onchange=e=>giveInfo.date=e.target.value;
+ $('#gD').onchange=e=>{giveInfo.date=e.target.value;giveInfo.dateSet=true};
  $('#gN').oninput=e=>giveInfo.note=e.target.value;
  $('#gq').oninput=e=>{search=e.target.value;rGiveList()};
  rGiveList();
@@ -429,7 +480,7 @@ function rGiveList(){
   h+=`<div class="cat"><div class="cath"><span>${esc(c.name)}</span></div>`;
   its.forEach(i=>{const q=cart[i.id]||0;
    h+=`<div class="item giveit"><div class="info"><b>${esc(i.name)}</b><small>Υπάρχουν ${qtyTxt(i,i.stock)} · ${priceLbl(i)}</small></div>
-   <div class="qbox"><button class="qb" data-act="cm" data-id="${i.id}">−</button><input class="qin" data-id="${i.id}" inputmode="decimal" value="${q?fmtN(q):''}" placeholder="0"><button class="qb p" data-act="cp" data-id="${i.id}">+</button></div>
+   <div class="qbox"><button class="qb" data-act="cm" data-id="${i.id}">−</button><input class="qin" data-id="${i.id}" inputmode="decimal" value="${fmtIn(q)}" placeholder="0"><button class="qb p" data-act="cp" data-id="${i.id}">+</button></div>
    <div class="lt" id="lt_${i.id}">${q?qtyTxt(i,q)+' = '+eur(val(i,q)):''}</div></div>`});
   h+='</div>'});
  if(!h)h='<div class="empty">Δεν υπάρχουν είδη. Πρόσθεσε από την «Αποθήκη».</div>';
@@ -437,13 +488,13 @@ function rGiveList(){
  document.querySelectorAll('.qin').forEach(inp=>inp.oninput=()=>{setCart(inp.dataset.id,num(inp.value),false)});
 }
 function setCart(id,q,rewrite){const i=item(id);q=Math.max(0,r3(q));if(q)cart[id]=q;else delete cart[id];
- if(rewrite){const inp=document.querySelector('.qin[data-id="'+id+'"]');if(inp)inp.value=q?fmtN(q):''}
+ if(rewrite){const inp=document.querySelector('.qin[data-id="'+id+'"]');if(inp)inp.value=fmtIn(q)}
  const lt=$('#lt_'+id);if(lt){const over=q>i.stock;lt.innerHTML=q?(over?'<span class="low">⚠ περισσότερα από όσα υπάρχουν · </span>':'')+qtyTxt(i,q)+' = '+eur(val(i,q)):''}
  updBar()}
-function updBar(){const ls=cartLines();if(!$('#gTot'))return;$('#gTot').textContent=eur(cartTotal());$('#gCnt').textContent=ls.length?ls.length+' είδη':'Δεν έχεις διαλέξει τίποτα'}
+function updBar(){const ls=cartLines();if(!$('#gTot'))return;$('#gTot').textContent=eur(cartTotal());$('#gCnt').textContent=ls.length?ls.length+' '+plural(ls.length,'είδος','είδη'):'Δεν έχεις διαλέξει τίποτα'}
 
 function saveDelivery(person,date,note,lines){
- addPerson(person);
+ person=addPerson(person);
  S.seq=(S.seq||0)+1;
  const d={id:uid(),no:S.seq,ts:Date.now(),date,person,note,lines:lines.map(l=>({itemId:l.it.id,name:l.it.name,unit:l.it.unit,qty:r3(l.q),price:l.it.price,total:Math.round(val(l.it,l.q)*100)/100}))};
  d.total=Math.round(d.lines.reduce((s,l)=>s+l.total,0)*100)/100;
@@ -455,30 +506,31 @@ function finishGive(){
  if(!ls.length){alert('Διάλεξε τουλάχιστον ένα είδος');return}
  if(!per){alert('Γράψε σε ποιον τα δίνεις');$('#gP')&&$('#gP').focus();return}
  const over=ls.filter(l=>l.q>l.it.stock);
- openModal(`<h2>Επιβεβαίωση</h2><div class="note">Σε: <b>${esc(per)}</b> · ${dGR(giveInfo.date)}</div>
+ openModal(`<h2>Επιβεβαίωση</h2><div class="note">Σε: <b>${esc(canonPerson(per))}</b> · ${dGR(giveInfo.date||today())}</div>
  <table><tr><th>Είδος</th><th class="r">Ποσ.</th><th class="r">€</th></tr>
  ${ls.map(l=>`<tr><td>${esc(l.it.name)}</td><td class="r">${qtyTxt(l.it,l.q)}</td><td class="r">${eur(val(l.it,l.q))}</td></tr>`).join('')}
  <tr><td colspan="2"><b>ΣΥΝΟΛΟ</b></td><td class="r big">${eur(cartTotal())}</td></tr></table>
  ${over.length?`<div class="note low">⚠ Δεν φτάνει το απόθεμα για: ${over.map(l=>esc(l.it.name)).join(', ')}. Θα βγει αρνητικό.</div>`:''}
  <div class="mact"><button class="btn sec" onclick="closeModal()">Πίσω</button><button class="btn" id="cOk">Καταχώρηση</button></div>`);
- $('#cOk').onclick=()=>{const d=saveDelivery(per,giveInfo.date||today(),giveInfo.note,ls);cart={};giveInfo={person:'',date:today(),note:''};search='';render();showDelivery(d,true)};
+ $('#cOk').onclick=()=>{if($('#cOk').disabled)return;$('#cOk').disabled=true;const d=saveDelivery(per,giveInfo.date||today(),giveInfo.note,ls);cart={};giveInfo={person:'',date:today(),note:''};search='';render();showDelivery(d,true)};
 }
 
 function showDelivery(d,fresh){
  openModal(`<h2>${fresh?'✅ Καταχωρήθηκε':'Παράδοση'}</h2><div class="note">${d.no?'Αρ. '+d.no+' · ':''}<b>${esc(d.person)}</b> · ${dGR(d.date)}${d.note?' · '+esc(d.note):''}</div>
  <table><tr><th>Είδος</th><th class="r">Ποσ.</th><th class="r">Τιμή</th><th class="r">€</th></tr>
- ${d.lines.map(l=>{const u=U(l.unit);return `<tr><td>${esc(l.name)}</td><td class="r">${fmtN(l.qty)} ${Math.abs(l.qty)===1?u.s:u.p}</td><td class="r">${eur(l.price)}${u.per?'/κιλό':''}</td><td class="r">${eur(l.total)}</td></tr>`}).join('')}
+ ${d.lines.map(l=>{const u=U(l.unit);return `<tr><td>${esc(l.name)}</td><td class="r">${fmtN(l.qty)} ${Math.abs(l.qty)===1?u.s:u.p}</td><td class="r">${eur(l.price)}/${u.per||u.s}</td><td class="r">${eur(l.total)}</td></tr>`}).join('')}
  <tr><td colspan="3"><b>ΣΥΝΟΛΟ</b></td><td class="r big">${eur(d.total)}</td></tr></table>
  <div class="mact">${fresh?'':'<button class="btn red" id="dDel">Ακύρωση</button>'}<button class="btn blue" id="dSh">📄 PDF</button><button class="btn sec" onclick="closeModal()">Κλείσιμο</button></div>
  ${fresh?'':'<div class="note">«Ακύρωση» σβήνει την παράδοση και επιστρέφει τα είδη στην αποθήκη.</div>'}`);
  $('#dSh').onclick=()=>delPDF(d);
- if(!fresh)$('#dDel').onclick=()=>{if(!confirm('Ακύρωση της παράδοσης; Τα είδη θα επιστρέψουν στην αποθήκη.'))return;
+ if(!fresh)$('#dDel').onclick=()=>{if(!S.deliveries.includes(d))return;if(!confirm('Ακύρωση της παράδοσης; Τα είδη θα επιστρέψουν στην αποθήκη.'))return;
   d.lines.forEach(l=>{const it=item(l.itemId);if(it){it.stock=r3(it.stock+l.qty);addMove(it,l.qty,'Ακύρωση παράδοσης',d.person)}});
   S.deliveries=S.deliveries.filter(x=>x.id!==d.id);save();closeModal();render();toast('Ακυρώθηκε')};
 }
 
 // ---------- HISTORY ----------
 function rHist(){
+ if(histPerson&&!allPeople().includes(histPerson))histPerson='';
  const dels=S.deliveries.filter(d=>!histPerson||d.person===histPerson).sort((a,b)=>(b.date+b.ts).localeCompare(a.date+a.ts));
  const all=dels.reduce((s,d)=>s+d.total,0);
  let h=`<div class="seg"><button data-act="hseg" data-s="del" class="${histSeg==='del'?'on':''}">Παραδόσεις</button><button data-act="hseg" data-s="mv" class="${histSeg==='mv'?'on':''}">Όλες οι κινήσεις</button></div>`;
@@ -486,8 +538,12 @@ function rHist(){
   const mv=S.moves.slice().sort((a,b)=>(b.date+b.ts).localeCompare(a.date+a.ts)).slice(0,400);
   h+='<div class="card">'+(mv.length?mv.map(m=>`<div class="mv"><div><b>${esc(m.name)}</b><br><small style="color:var(--mut)">${dGR(m.date)} · ${esc(m.type)}${m.note?' · '+esc(m.note):''}</small></div><div class="${m.delta>0?'plus':'minus'}">${m.delta>0?'+':''}${fmtN(m.delta)} ${U(m.unit).p}</div></div>`).join(''):'<div class="empty">Καμία κίνηση ακόμη.</div>')+'</div>';
   $('#main').innerHTML=h;return}
- h+=`<select id="hP" style="margin-bottom:10px"><option value="">Όλα τα άτομα</option>${S.people.map(p=>`<option ${p===histPerson?'selected':''}>${esc(p)}</option>`).join('')}</select>
+ h+=`<select id="hP" style="margin-bottom:10px"><option value="">Όλα τα άτομα</option>${allPeople().map(p=>`<option value="${esc(p)}" ${p===histPerson?'selected':''}>${esc(p)}</option>`).join('')}</select>
  <div class="card row"><div class="sp"><small style="color:var(--mut)">Σύνολο μέχρι σήμερα${histPerson?' — '+esc(histPerson):''}</small><div class="big">${eur(all)}</div></div><div style="text-align:right"><b>${dels.length}</b><br><small style="color:var(--mut)">παραδόσεις</small></div></div>`;
+ const yrs=[...new Set(dels.map(d=>d.date.slice(0,4)))].sort().reverse();
+ if(dels.length)h+=`<div class="card"><b>Συγκεντρωτικά PDF</b>${histPerson?'<div class="note">Μόνο για: '+esc(histPerson)+'</div>':''}
+  <div class="row" style="margin-top:8px"><select id="hY" style="width:110px">${yrs.map(y=>`<option>${y}</option>`).join('')}</select><button class="btn blue sp" data-act="yearPDF">📄 PDF έτους</button></div>
+  <button class="btn blue full" style="margin-top:8px" data-act="allPDF">📄 PDF όλων μέχρι σήμερα</button></div>`;
  if(!dels.length)h+='<div class="empty">Δεν έχεις δώσει τίποτα ακόμη.<br>Πήγαινε στο «Δόσιμο».</div>';
  const byM={};dels.forEach(d=>{const k=d.date.slice(0,7);(byM[k]=byM[k]||[]).push(d)});
  Object.keys(byM).sort().reverse().forEach((k,idx)=>{const ds=byM[k];const tot=ds.reduce((s,d)=>s+d.total,0);const[y,m]=k.split('-');
@@ -496,7 +552,7 @@ function rHist(){
   h+=`<details class="month" ${idx===0?'open':''}><summary><span>${MONTHS[+m-1]} ${y}</span><span>${eur(tot)} · ${ds.length}</span></summary><div class="mb">
   <h3>Ανά είδος</h3><table>${Object.values(pi).sort((a,b)=>b.t-a.t).map(o=>`<tr><td>${esc(o.name)}</td><td class="r">${fmtN(r3(o.q))} ${U(o.unit).p}</td><td class="r">${eur(o.t)}</td></tr>`).join('')}</table>
   ${histPerson?'':`<h3>Ανά άτομο</h3><table>${Object.entries(pp).sort((a,b)=>b[1]-a[1]).map(([p,t])=>`<tr><td>${esc(p)}</td><td class="r">${eur(t)}</td></tr>`).join('')}</table>`}
-  <h3>Παραδόσεις</h3>${ds.map(d=>`<div class="dl" data-act="showDel" data-id="${d.id}"><div><b>${esc(d.person)}</b><br><small>${dGR(d.date)} · ${d.lines.length} είδη${d.note?' · '+esc(d.note):''}</small></div><b>${eur(d.total)} ›</b></div>`).join('')}
+  <h3>Παραδόσεις</h3>${ds.map(d=>`<div class="dl" data-act="showDel" data-id="${d.id}"><div><b>${esc(d.person)}</b><br><small>${dGR(d.date)} · ${d.lines.length} ${plural(d.lines.length,'είδος','είδη')}${d.note?' · '+esc(d.note):''}</small></div><b>${eur(d.total)} ›</b></div>`).join('')}
   <button class="btn sec sm" style="margin-top:10px" data-act="shareMonth" data-k="${k}">📄 PDF μήνα</button>
   </div></details>`});
  $('#main').innerHTML=h;
@@ -521,6 +577,8 @@ function rCount(){
   countVals[id]=inp.value;const d=r3(num(inp.value)-i.stock);const e=$('#df_'+id);e.textContent=d===0?'✓ σωστό':(d>0?'+':'')+fmtN(d)+' '+U(i.unit).p+' ('+(d>0?'+':'')+eur(val(i,d))+')';e.style.color=d===0?'var(--g)':d>0?'var(--blue)':'var(--red)'};inp.oninput=f;f()});
 }
 function saveCount(){const ids=Object.keys(countVals).filter(id=>item(id));if(!ids.length){alert('Δεν έγραψες καμία μέτρηση');return}
+ const nch=ids.filter(id=>r3(num(countVals[id]))!==item(id).stock).length;
+ if(nch&&!confirm('Θα διορθωθεί το απόθεμα σε '+nch+' '+plural(nch,'είδος','είδη')+'. Συνέχεια;'))return;
  let ch=0;ids.forEach(id=>{const i=item(id),n=r3(num(countVals[id])),d=r3(n-i.stock);if(d!==0){i.stock=n;addMove(i,d,'Απογραφή');ch++}});
  save();countVals={};render();toast(ch?'Διορθώθηκαν '+ch+' είδη':'Όλα σωστά ✓')}
 
@@ -539,14 +597,18 @@ function rSet(){
  <button class="btn sec full" style="margin-top:10px" data-act="pAdd">+ Νέο άτομο</button></div>
  <div class="card"><b>Αντίγραφο ασφαλείας</b><div class="note">Τα δεδομένα μένουν μόνο σε αυτό το κινητό. Η εφαρμογή σού το θυμίζει μία φορά την εβδομάδα.<br>Τελευταίο αντίγραφο: <b>${ago(S.lastBackup)}</b></div>
  <div class="row"><button class="btn sp" data-act="exp">⬇ Εξαγωγή</button><button class="btn sec sp" data-act="imp">⬆ Επαναφορά</button></div></div>
- <div class="card"><button class="btn red full" data-act="wipe">Διαγραφή όλων των δεδομένων</button><div class="note" style="text-align:center;margin-top:10px">Αποθήκη Τροφίμων · v1.2</div></div>`;
+ <div class="card"><button class="btn red full" data-act="wipe">Διαγραφή όλων των δεδομένων</button><div class="note" style="text-align:center;margin-top:10px">Αποθήκη Τροφίμων · v1.5</div></div>`;
  document.querySelectorAll('[data-biz]').forEach(i=>i.oninput=()=>{S.biz[i.dataset.biz]=i.value;save()});
 }
 function exportData(){const txt=JSON.stringify(S,null,1);const name='apothiki-'+today()+'.json';
  try{const f=new File([txt],name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f],title:name}).then(()=>{backupDone();toast('Το αντίγραφο στάλθηκε ✓')}).catch(()=>{});return}}catch(e){}
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/json'}));a.download=name;document.body.appendChild(a);a.click();a.remove();backupDone();toast('Αποθηκεύτηκε '+name)}
-$('#impfile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.cats||!d.items)throw 0;if(confirm('Να αντικατασταθούν τα τωρινά δεδομένα με το αντίγραφο;')){S=d;load2();save();render();toast('Έγινε επαναφορά')}}catch(x){alert('Μη έγκυρο αρχείο')}e.target.value=''};r.readAsText(f)};
-function load2(){['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]});if(!S.biz)S.biz={name:'',phone:'',addr:''}}
+$('#impfile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+ r.onload=()=>{let d;try{d=JSON.parse(r.result)}catch(x){d=null}e.target.value='';
+  if(!d||!Array.isArray(d.cats)||!Array.isArray(d.items)){alert('Αυτό το αρχείο δεν είναι αντίγραφο της Αποθήκης.');return}
+  if(!confirm('Επαναφορά από αντίγραφο:\n'+d.items.length+' είδη, '+((d.deliveries||[]).length)+' παραδόσεις.\n\nΤα τωρινά δεδομένα θα αντικατασταθούν. Συνέχεια;'))return;
+  S=d;normalize();S.lastBackup=Date.now();S.snoozeUntil=0;save();cart={};countVals={};histPerson='';render();toast('Έγινε επαναφορά ✓')};
+ r.onerror=()=>alert('Δεν διαβάστηκε το αρχείο');r.readAsText(f)};
 
 // ---------- actions ----------
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act,id=el.dataset.id;
@@ -561,7 +623,9 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
   case'finishGive':finishGive();break;
   case'hseg':histSeg=el.dataset.s;rHist();break;
   case'showDel':showDelivery(S.deliveries.find(d=>d.id===id));break;
-  case'shareMonth':monthPDF(el.dataset.k);break;
+  case'shareMonth':periodPDF('m',el.dataset.k);break;
+  case'yearPDF':periodPDF('y',$('#hY').value);break;
+  case'allPDF':periodPDF('all');break;
   case'saveCount':saveCount();break;
   case'stockPDF':stockPDF();break;
   case'sharePDF':sharePDF();break;
@@ -575,11 +639,11 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
   case'exp':exportData();break;
   case'snooze':S.snoozeUntil=Date.now()+DAY;save();rBanner();toast('Θα σου το θυμίσω αύριο');break;
   case'imp':$('#impfile').click();break;
-  case'wipe':if(confirm('Θα σβηστούν ΟΛΑ (είδη, ιστορικό, άτομα). Σίγουρα;')&&confirm('Τελευταία επιβεβαίωση: διαγραφή όλων;')){S=seed();save();cart={};render();toast('Διαγράφηκαν')}break;
+  case'wipe':if(confirm('Θα σβηστούν ΟΛΑ (είδη, ιστορικό, άτομα). Σίγουρα;')&&confirm('Τελευταία επιβεβαίωση: διαγραφή όλων;')){S=seed();normalize();save();cart={};countVals={};histPerson='';giveInfo={person:'',date:today(),note:''};render();toast('Διαγράφηκαν')}break;
  }});
 
 load();render();
-if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}));
 </script>
 </body>
 </html>
