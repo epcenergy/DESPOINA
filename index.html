@@ -93,19 +93,12 @@ h3{font-size:14px;color:var(--g);margin:14px 0 4px}
 .li span{flex:1}
 .note{font-size:13px;color:var(--mut);margin:4px 0 10px}
 .big{font-size:22px;font-weight:800;color:var(--g)}
-#print{display:none}
-@media print{
- body>*:not(#print){display:none!important}
- #print{display:block;font-size:12px;padding:10px}
- #print table{font-size:12px}
- #print h1{font-size:18px}
-}
 </style>
 </head>
 <body>
 <header>
  <h1>🫙 Αποθήκη Τροφίμων</h1>
- <div class="row"><div class="hv">Αξία αποθήκης<b id="hval">0 €</b></div><button id="hshare" data-act="shareMenu" aria-label="Κοινοποίηση">📤</button></div>
+ <div class="row"><div class="hv">Αξία αποθήκης<b id="hval">0 €</b></div><button id="hshare" data-act="stockPDF" aria-label="PDF αποθήκης">📤</button></div>
 </header>
 <div id="banner"></div><main id="main"></main>
 <div id="barwrap"></div>
@@ -118,7 +111,6 @@ h3{font-size:14px;color:var(--g);margin:14px 0 4px}
 </nav>
 <div id="modal"><div id="mbody"></div></div>
 <div id="toast"></div>
-<div id="print"></div>
 <input type="file" id="impfile" accept=".json,application/json" style="display:none">
 
 <script>
@@ -169,6 +161,8 @@ function load(){try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
  if(!S||!S.cats){S=seed();save()}
  ['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]});
  if(!S.created){S.created=Date.now();save()}
+ if(!S.biz)S.biz={name:'',phone:'',addr:''};
+ if(S.deliveries.some(d=>!d.no)){const ord=S.deliveries.slice().sort((a,b)=>a.ts-b.ts);let n=0;ord.forEach(d=>{if(d.no)n=Math.max(n,d.no)});ord.forEach(d=>{if(!d.no)d.no=++n});S.seq=Math.max(S.seq||0,n);save()}
 }
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){alert('Σφάλμα αποθήκευσης: '+e.message)}}
 const item=id=>S.items.find(i=>i.id===id);
@@ -202,16 +196,122 @@ function rBanner(){const b=$('#banner');if(!backupDue()){b.innerHTML='';return}
 function backupDone(){S.lastBackup=Date.now();S.snoozeUntil=0;save();rBanner();if(TAB==='set')rSet()}
 function ago(ts){if(!ts)return'ποτέ';const d=Math.floor((Date.now()-ts)/DAY);const dt=new Date(ts);return dGR(dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'))+(d===0?' (σήμερα)':d===1?' (χθες)':' (πριν '+d+' ημέρες)')}
 
-// ---------- SHARE STOCK ----------
-function shareMenu(){
- openModal(`<h2>📤 Κοινοποίηση αποθήκης</h2><div class="note">Τι υπάρχει τώρα στην αποθήκη, με ποσότητες και αξία.</div>
- <button class="btn full" style="margin-bottom:8px" data-act="shareStock">💬 Ως κείμενο (Viber, SMS, email…)</button>
- <button class="btn blue full" style="margin-bottom:8px" data-act="printStock">📄 Ως PDF / Εκτύπωση</button>
- <label><input type="checkbox" id="shZero" style="width:auto"> Να φαίνονται και όσα έχουν 0</label>
- <div class="mact"><button class="btn sec" onclick="closeModal()">Κλείσιμο</button></div>`);
- const z=$('#shZero');z.checked=!!S.shareZero;z.onchange=()=>{S.shareZero=z.checked;save()};
+// ---------- PDF ----------
+const PW=1190,PH=1684,PSC=1.4,PM=64;
+const PC={g:'#2f5d3a',gl:'#e8f0e9',tx:'#1f2420',mut:'#6b716c',line:'#dcd9cf',zeb:'#f7f6f1',red:'#c0392b',hd:'#eef2ee'};
+const PF='-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif';
+function pfit(x,s,max){s=String(s);if(x.measureText(s).width<=max)return s;while(s.length>1&&x.measureText(s+'…').width>max)s=s.slice(0,-1);return s+'…'}
+function ptxt(x,s,X,Y,o){o=o||{};x.font=(o.b?'700 ':'400 ')+(o.s||20)+'px '+PF;x.fillStyle=o.c||PC.tx;x.textAlign=o.al||'left';x.textBaseline='alphabetic';x.fillText(o.max?pfit(x,s,o.max):s,X,Y)}
+function prr(x,X,Y,w,h,r,fill){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);x.arcTo(X+w,Y+h,X,Y+h,r);x.arcTo(X,Y+h,X,Y,r);x.arcTo(X,Y,X+w,Y,r);x.closePath();x.fillStyle=fill;x.fill()}
+function nowTxt(){const d=new Date();return dGR(today())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+function PDoc(title,subtitle){
+ const d={pages:[],title,subtitle,biz:S.biz||{}};
+ const bizName=()=>d.biz.name||'Αποθήκη Τροφίμων';
+ d.add=()=>{const c=document.createElement('canvas');c.width=Math.round(PW*PSC);c.height=Math.round(PH*PSC);const x=c.getContext('2d');x.scale(PSC,PSC);x.fillStyle='#fff';x.fillRect(0,0,PW,PH);d.pages.push(c);d.x=x;
+  if(d.pages.length===1){x.fillStyle=PC.g;x.fillRect(0,0,PW,160);
+   let fs=36;x.font='700 36px '+PF;while(fs>24&&x.measureText(bizName()).width>650){fs-=2;x.font='700 '+fs+'px '+PF}
+   ptxt(x,bizName(),PM,72,{s:fs,b:1,c:'#fff',max:650});
+   const sub=[d.biz.phone,d.biz.addr].filter(Boolean).join('   ·   ');if(sub)ptxt(x,sub,PM,112,{s:20,c:'#d5e3d8',max:650});
+   ptxt(x,d.title,PW-PM,72,{s:32,b:1,c:'#fff',al:'right',max:380});
+   ptxt(x,d.subtitle||'',PW-PM,112,{s:21,c:'#d5e3d8',al:'right',max:380});
+   d.y=204}
+  else{ptxt(x,bizName()+'   ·   '+d.title+(d.subtitle?'   ·   '+d.subtitle:''),PM,56,{s:18,c:PC.mut,max:PW-2*PM});x.fillStyle=PC.g;x.fillRect(PM,70,PW-2*PM,3);d.y=110}};
+ d.need=h=>{if(d.y+h>PH-90){d.add();return true}return false};
+ d.gap=n=>{d.y+=n};
+ d.boxes=arr=>{d.need(110);const x=d.x,g=18,w=(PW-2*PM-g*(arr.length-1))/arr.length;
+  arr.forEach((b,i)=>{const X=PM+i*(w+g);prr(x,X,d.y,w,96,12,PC.gl);ptxt(x,b.l,X+20,d.y+36,{s:18,c:PC.mut,max:w-40});ptxt(x,b.v,X+20,d.y+76,{s:b.vs||30,b:1,c:b.c||PC.g,max:w-40})});
+  d.y+=96+28};
+ d.heading=(l,r)=>{d.need(140);const x=d.x;prr(x,PM,d.y,PW-2*PM,50,8,PC.g);ptxt(x,l,PM+18,d.y+33,{s:23,b:1,c:'#fff',max:640});if(r)ptxt(x,r,PW-PM-18,d.y+33,{s:19,c:'#e3ede5',al:'right',max:440});d.y+=50};
+ d.table=(cols,rows)=>{const x=d.x,TW=PW-2*PM;let X=PM;cols.forEach(c=>{c.x=X;c.px=Math.round(c.w*TW);X+=c.px});
+  const head=()=>{const x=d.x;x.fillStyle=PC.hd;x.fillRect(PM,d.y,TW,40);cols.forEach(c=>{const tx=c.al==='r'?c.x+c.px-14:c.al==='c'?c.x+c.px/2:c.x+14;ptxt(x,c.t,tx,d.y+27,{s:16,b:1,c:PC.mut,al:c.al==='r'?'right':c.al==='c'?'center':'left'})});d.y+=40};
+  head();
+  rows.forEach((r,ri)=>{const rh=r.sub?66:48;if(d.need(rh))head();const x=d.x;
+   if(ri%2)(x.fillStyle=PC.zeb,x.fillRect(PM,d.y,TW,rh));
+   cols.forEach((c,ci)=>{const v=r.c[ci];const al=c.al==='r'?'right':c.al==='c'?'center':'left';const tx=c.al==='r'?c.x+c.px-14:c.al==='c'?c.x+c.px/2:c.x+14;
+    const sa=r.subAt||0;ptxt(x,v,tx,d.y+(r.sub&&ci===sa?30:(r.sub?33:31)),{s:20,b:(r.bold&&r.bold.includes(ci))?1:0,c:(r.col&&r.col[ci])||PC.tx,al,max:c.px-28});
+    if(ci===sa&&r.sub)ptxt(x,r.sub,tx,d.y+54,{s:16,c:PC.mut,max:c.px-28})});
+   x.fillStyle=PC.line;x.fillRect(PM,d.y+rh-1,TW,1);d.y+=rh});
+  if(!rows.length){d.need(48);ptxt(d.x,'—',PM+14,d.y+31,{s:20,c:PC.mut});d.y+=48}
+  d.y+=26};
+ d.note=t=>{if(!t)return;d.need(60);ptxt(d.x,t,PM,d.y+24,{s:19,c:PC.mut,max:PW-2*PM});d.y+=44};
+ d.total=(l,v)=>{d.need(110);const x=d.x,w=520,X=PW-PM-w;prr(x,X,d.y,w,92,12,PC.g);ptxt(x,l,X+24,d.y+56,{s:21,b:1,c:'#d5e3d8'});ptxt(x,v,X+w-24,d.y+60,{s:38,b:1,c:'#fff',al:'right'});d.y+=92+20};
+ d.finish=()=>{const n=d.pages.length;d.pages.forEach((c,i)=>{const x=c.getContext('2d');x.fillStyle=PC.line;x.fillRect(PM,PH-64,PW-2*PM,1);
+   ptxt(x,'Δημιουργήθηκε '+nowTxt(),PM,PH-34,{s:16,c:PC.mut});ptxt(x,'Σελίδα '+(i+1)+' από '+n,PW-PM,PH-34,{s:16,c:PC.mut,al:'right'})});return d.pages};
+ d.add();return d;
 }
-const shownInShare=i=>S.shareZero||i.stock!==0;
+function pdfBlob(canvases){
+ const enc=new TextEncoder(),parts=[],offs=[];let len=0;
+ const push=b=>{if(typeof b==='string')b=enc.encode(b);parts.push(b);len+=b.length};
+ const obj=(i,s)=>{offs[i]=len;push(i+' 0 obj\n'+s)};
+ const imgs=canvases.map(c=>{const u=c.toDataURL('image/jpeg',0.9),bin=atob(u.split(',')[1]),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return{b:a,w:c.width,h:c.height}});
+ const n=imgs.length,tot=2+3*n;
+ push('%PDF-1.4\n%âãÏÓ\n');
+ obj(1,'<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+ obj(2,'<< /Type /Pages /Kids ['+imgs.map((_,i)=>(3+3*i)+' 0 R').join(' ')+'] /Count '+n+' >>\nendobj\n');
+ imgs.forEach((im,i)=>{const p=3+3*i,cs='q 595.28 0 0 841.89 0 0 cm /Im'+i+' Do Q';
+  obj(p,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im'+i+' '+(p+2)+' 0 R >> >> /Contents '+(p+1)+' 0 R >>\nendobj\n');
+  obj(p+1,'<< /Length '+cs.length+' >>\nstream\n'+cs+'\nendstream\nendobj\n');
+  obj(p+2,'<< /Type /XObject /Subtype /Image /Width '+im.w+' /Height '+im.h+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+im.b.length+' >>\nstream\n');push(im.b);push('\nendstream\nendobj\n')});
+ const xr=len;let x='xref\n0 '+(tot+1)+'\n0000000000 65535 f \n';for(let i=1;i<=tot;i++)x+=String(offs[i]).padStart(10,'0')+' 00000 n \n';
+ push(x+'trailer\n<< /Size '+(tot+1)+' /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF\n');
+ return new Blob(parts,{type:'application/pdf'});
+}
+let curPDF=null;
+const fileSafe=s=>String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,'_');
+function showPDF(doc,fname){
+ toast('Δημιουργία PDF…');
+ setTimeout(()=>{
+  const pages=doc.finish();const blob=pdfBlob(pages);
+  if(curPDF&&curPDF.url)URL.revokeObjectURL(curPDF.url);
+  curPDF={blob,name:fileSafe(fname)+'.pdf',url:URL.createObjectURL(blob)};
+  openModal(`<h2>📄 ${esc(curPDF.name)}</h2><div class="note">${pages.length} ${pages.length===1?'σελίδα':'σελίδες'}</div>
+  <div style="max-height:52vh;overflow:auto;background:#e8e5da;border-radius:10px;padding:8px">${pages.map(c=>`<img src="${c.toDataURL('image/jpeg',0.7)}" style="width:100%;display:block;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.2)">`).join('')}</div>
+  <div class="mact"><button class="btn sec" onclick="closeModal()">Κλείσιμο</button><button class="btn sec" data-act="openPDF">Άνοιγμα</button><button class="btn" data-act="sharePDF">📤 Αποστολή</button></div>`);
+ },30);
+}
+function sharePDF(){if(!curPDF)return;
+ try{const f=new File([curPDF.blob],curPDF.name,{type:'application/pdf'});
+  if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f]}).catch(()=>{});return}}catch(e){}
+ openPDF()}
+function openPDF(){if(!curPDF)return;const a=document.createElement('a');a.href=curPDF.url;a.target='_blank';a.rel='noopener';a.download=curPDF.name;document.body.appendChild(a);a.click();a.remove()}
+
+function stockPDF(){
+ const d=PDoc('Κατάσταση Αποθήκης',dGR(today()));
+ const used=S.cats.filter(c=>catItems(c.id,'').length);
+ const low=S.items.filter(i=>i.min>0&&i.stock<=i.min).length;
+ d.boxes([{l:'Είδη',v:String(S.items.length)},{l:'Κατηγορίες',v:String(used.length)},{l:'Λίγα / τελειώνουν',v:String(low),c:low?PC.red:PC.g},{l:'Συνολική αξία',v:eur(stockValue())}]);
+ used.forEach(c=>{const its=catItems(c.id,'');const cv=its.reduce((s,i)=>s+val(i,Math.max(0,i.stock)),0);
+  d.heading(c.name,its.length+' είδη  ·  '+eur(cv));
+  d.table([{t:'ΕΙΔΟΣ',w:.44},{t:'ΑΠΟΘΕΜΑ',w:.18,al:'r'},{t:'ΤΙΜΗ',w:.2,al:'r'},{t:'ΑΞΙΑ',w:.18,al:'r'}],
+   its.map(i=>{const lw=i.min>0&&i.stock<=i.min;return{c:[i.name,qtyTxt(i,i.stock),priceLbl(i),eur(val(i,Math.max(0,i.stock)))],sub:i.pack||null,bold:[0,1],col:{1:lw?PC.red:(i.stock===0?PC.mut:PC.tx)}}}))});
+ d.total('ΣΥΝΟΛΙΚΗ ΑΞΙΑ',eur(stockValue()));
+ showPDF(d,'Αποθήκη_'+dGR(today()).replace(/\//g,'-'));
+}
+function delPDF(dl){
+ const d=PDoc('Παραγγελία',(dl.no?'Αρ. '+dl.no+'  ·  ':'')+dGR(dl.date));
+ d.boxes([{l:'Πελάτης',v:dl.person,vs:28},{l:'Ημερομηνία',v:dGR(dl.date),vs:28},{l:'Είδη',v:String(dl.lines.length),vs:28}]);
+ d.table([{t:'#',w:.07,al:'c'},{t:'ΕΙΔΟΣ',w:.39},{t:'ΠΟΣΟΤΗΤΑ',w:.18,al:'r'},{t:'ΤΙΜΗ',w:.18,al:'r'},{t:'ΣΥΝΟΛΟ',w:.18,al:'r'}],
+  dl.lines.map((l,i)=>{const u=U(l.unit),it=item(l.itemId);return{c:[String(i+1),l.name,fmtN(l.qty)+' '+(Math.abs(l.qty)===1?u.s:u.p),eur(l.price)+' / '+(u.per||u.s),eur(l.total)],sub:it&&it.pack?it.pack:null,subAt:1,bold:[1,4],col:{0:PC.mut}}}));
+ if(dl.note)d.note('Σημείωση: '+dl.note);
+ d.total('ΣΥΝΟΛΟ',eur(dl.total));
+ showPDF(d,'Παραγγελία_'+(dl.no?dl.no+'_':'')+dl.person+'_'+dGR(dl.date).replace(/\//g,'-'));
+}
+function monthPDF(k){
+ const ds=S.deliveries.filter(x=>x.date.slice(0,7)===k&&(!histPerson||x.person===histPerson)).sort((a,b)=>(a.date+a.ts).localeCompare(b.date+b.ts));
+ const[y,m]=k.split('-');const tot=ds.reduce((s,x)=>s+x.total,0);
+ const d=PDoc('Παραδόσεις μήνα',MONTHS[+m-1]+' '+y+(histPerson?'  ·  '+histPerson:''));
+ const pi={},pp={};ds.forEach(x=>{const o=pp[x.person]=pp[x.person]||{n:0,t:0};o.n++;o.t+=x.total;x.lines.forEach(l=>{const kk=l.name+'|'+l.unit;const q=pi[kk]=pi[kk]||{name:l.name,unit:l.unit,q:0,t:0};q.q+=l.qty;q.t+=l.total})});
+ d.boxes([{l:'Παραδόσεις',v:String(ds.length)},{l:'Άτομα',v:String(Object.keys(pp).length)},{l:'Σύνολο μήνα',v:eur(tot)}]);
+ d.heading('Ανά είδος');
+ d.table([{t:'ΕΙΔΟΣ',w:.56},{t:'ΠΟΣΟΤΗΤΑ',w:.22,al:'r'},{t:'ΑΞΙΑ',w:.22,al:'r'}],Object.values(pi).sort((a,b)=>b.t-a.t).map(o=>({c:[o.name,fmtN(r3(o.q))+' '+U(o.unit).p,eur(o.t)],bold:[0,2]})));
+ if(!histPerson){d.heading('Ανά άτομο');
+  d.table([{t:'ΑΤΟΜΟ',w:.56},{t:'ΠΑΡΑΔΟΣΕΙΣ',w:.22,al:'r'},{t:'ΣΥΝΟΛΟ',w:.22,al:'r'}],Object.entries(pp).sort((a,b)=>b[1].t-a[1].t).map(([p,o])=>({c:[p,String(o.n),eur(o.t)],bold:[0,2]})))}
+ d.heading('Αναλυτικά');
+ d.table([{t:'ΗΜΕΡΟΜΗΝΙΑ',w:.2},{t:'ΑΡ.',w:.1,al:'c'},{t:'ΑΤΟΜΟ',w:.34},{t:'ΕΙΔΗ',w:.14,al:'r'},{t:'ΣΥΝΟΛΟ',w:.22,al:'r'}],
+  ds.map(x=>({c:[dGR(x.date),String(x.no||''),x.person,String(x.lines.length),eur(x.total)],sub:null,bold:[2,4]})));
+ d.total('ΣΥΝΟΛΟ ΜΗΝΑ',eur(tot));
+ showPDF(d,'Παραδόσεις_'+MONTHS[+m-1]+'_'+y+(histPerson?'_'+histPerson:''));
+}
 
 // ---------- STOCK ----------
 function rStock(){
@@ -344,7 +444,8 @@ function updBar(){const ls=cartLines();if(!$('#gTot'))return;$('#gTot').textCont
 
 function saveDelivery(person,date,note,lines){
  addPerson(person);
- const d={id:uid(),ts:Date.now(),date,person,note,lines:lines.map(l=>({itemId:l.it.id,name:l.it.name,unit:l.it.unit,qty:r3(l.q),price:l.it.price,total:Math.round(val(l.it,l.q)*100)/100}))};
+ S.seq=(S.seq||0)+1;
+ const d={id:uid(),no:S.seq,ts:Date.now(),date,person,note,lines:lines.map(l=>({itemId:l.it.id,name:l.it.name,unit:l.it.unit,qty:r3(l.q),price:l.it.price,total:Math.round(val(l.it,l.q)*100)/100}))};
  d.total=Math.round(d.lines.reduce((s,l)=>s+l.total,0)*100)/100;
  lines.forEach(l=>{l.it.stock=r3(l.it.stock-l.q);addMove(l.it,-l.q,'Δόθηκε',person,date)});
  S.deliveries.push(d);save();return d;
@@ -363,16 +464,14 @@ function finishGive(){
  $('#cOk').onclick=()=>{const d=saveDelivery(per,giveInfo.date||today(),giveInfo.note,ls);cart={};giveInfo={person:'',date:today(),note:''};search='';render();showDelivery(d,true)};
 }
 
-function delText(d){return `${d.person} — ${dGR(d.date)}\n`+d.lines.map(l=>`• ${l.name}: ${fmtN(l.qty)} ${Math.abs(l.qty)===1?U(l.unit).s:U(l.unit).p} = ${eur(l.total)}`).join('\n')+`\nΣΥΝΟΛΟ: ${eur(d.total)}`+(d.note?`\n(${d.note})`:'')}
-function share(text){if(navigator.share){navigator.share({text}).catch(()=>{})}else if(navigator.clipboard){navigator.clipboard.writeText(text).then(()=>toast('Αντιγράφηκε'))}else prompt('Αντέγραψε:',text)}
 function showDelivery(d,fresh){
- openModal(`<h2>${fresh?'✅ Καταχωρήθηκε':'Παράδοση'}</h2><div class="note"><b>${esc(d.person)}</b> · ${dGR(d.date)}${d.note?' · '+esc(d.note):''}</div>
+ openModal(`<h2>${fresh?'✅ Καταχωρήθηκε':'Παράδοση'}</h2><div class="note">${d.no?'Αρ. '+d.no+' · ':''}<b>${esc(d.person)}</b> · ${dGR(d.date)}${d.note?' · '+esc(d.note):''}</div>
  <table><tr><th>Είδος</th><th class="r">Ποσ.</th><th class="r">Τιμή</th><th class="r">€</th></tr>
  ${d.lines.map(l=>{const u=U(l.unit);return `<tr><td>${esc(l.name)}</td><td class="r">${fmtN(l.qty)} ${Math.abs(l.qty)===1?u.s:u.p}</td><td class="r">${eur(l.price)}${u.per?'/κιλό':''}</td><td class="r">${eur(l.total)}</td></tr>`}).join('')}
  <tr><td colspan="3"><b>ΣΥΝΟΛΟ</b></td><td class="r big">${eur(d.total)}</td></tr></table>
- <div class="mact">${fresh?'':'<button class="btn red" id="dDel">Ακύρωση</button>'}<button class="btn blue" id="dSh">Αποστολή</button><button class="btn sec" onclick="closeModal()">Κλείσιμο</button></div>
+ <div class="mact">${fresh?'':'<button class="btn red" id="dDel">Ακύρωση</button>'}<button class="btn blue" id="dSh">📄 PDF</button><button class="btn sec" onclick="closeModal()">Κλείσιμο</button></div>
  ${fresh?'':'<div class="note">«Ακύρωση» σβήνει την παράδοση και επιστρέφει τα είδη στην αποθήκη.</div>'}`);
- $('#dSh').onclick=()=>share(delText(d));
+ $('#dSh').onclick=()=>delPDF(d);
  if(!fresh)$('#dDel').onclick=()=>{if(!confirm('Ακύρωση της παράδοσης; Τα είδη θα επιστρέψουν στην αποθήκη.'))return;
   d.lines.forEach(l=>{const it=item(l.itemId);if(it){it.stock=r3(it.stock+l.qty);addMove(it,l.qty,'Ακύρωση παράδοσης',d.person)}});
   S.deliveries=S.deliveries.filter(x=>x.id!==d.id);save();closeModal();render();toast('Ακυρώθηκε')};
@@ -398,19 +497,17 @@ function rHist(){
   <h3>Ανά είδος</h3><table>${Object.values(pi).sort((a,b)=>b.t-a.t).map(o=>`<tr><td>${esc(o.name)}</td><td class="r">${fmtN(r3(o.q))} ${U(o.unit).p}</td><td class="r">${eur(o.t)}</td></tr>`).join('')}</table>
   ${histPerson?'':`<h3>Ανά άτομο</h3><table>${Object.entries(pp).sort((a,b)=>b[1]-a[1]).map(([p,t])=>`<tr><td>${esc(p)}</td><td class="r">${eur(t)}</td></tr>`).join('')}</table>`}
   <h3>Παραδόσεις</h3>${ds.map(d=>`<div class="dl" data-act="showDel" data-id="${d.id}"><div><b>${esc(d.person)}</b><br><small>${dGR(d.date)} · ${d.lines.length} είδη${d.note?' · '+esc(d.note):''}</small></div><b>${eur(d.total)} ›</b></div>`).join('')}
-  <button class="btn sec sm" style="margin-top:10px" data-act="shareMonth" data-k="${k}">Αποστολή μήνα</button>
+  <button class="btn sec sm" style="margin-top:10px" data-act="shareMonth" data-k="${k}">📄 PDF μήνα</button>
   </div></details>`});
  $('#main').innerHTML=h;
  const hp=$('#hP');if(hp)hp.onchange=e=>{histPerson=e.target.value;rHist()};
 }
-function shareMonth(k){const ds=S.deliveries.filter(d=>d.date.slice(0,7)===k&&(!histPerson||d.person===histPerson)).sort((a,b)=>a.date.localeCompare(b.date));const[y,m]=k.split('-');
- share(`${MONTHS[+m-1]} ${y}${histPerson?' — '+histPerson:''}\n\n`+ds.map(delText).join('\n\n')+`\n\nΣΥΝΟΛΟ ΜΗΝΑ: ${eur(ds.reduce((s,d)=>s+d.total,0))}`)}
 
 // ---------- COUNT ----------
 let countVals={};
 function rCount(){
  let h=`<div class="card"><b>Απογραφή αποθήκης</b><div class="note">Γράψε πόσα μέτρησες σε κάθε είδος. Όσα αφήσεις κενά δεν αλλάζουν. Με «Αποθήκευση» διορθώνεται το απόθεμα και γράφεται στις κινήσεις.</div>
- <div class="row"><button class="btn sec sm sp" data-act="printStock">🖨 Εκτύπωση / PDF</button><button class="btn sec sm sp" data-act="shareStock">📤 Αποστολή λίστας</button></div></div>`;
+ <button class="btn blue full" data-act="stockPDF">📄 PDF αποθήκης</button></div>`;
  S.cats.forEach(c=>{const its=catItems(c.id,'');if(!its.length)return;
   h+=`<div class="cat"><div class="cath"><span>${esc(c.name)}</span></div>`;
   its.forEach(i=>{const v=countVals[i.id];
@@ -426,14 +523,14 @@ function rCount(){
 function saveCount(){const ids=Object.keys(countVals).filter(id=>item(id));if(!ids.length){alert('Δεν έγραψες καμία μέτρηση');return}
  let ch=0;ids.forEach(id=>{const i=item(id),n=r3(num(countVals[id])),d=r3(n-i.stock);if(d!==0){i.stock=n;addMove(i,d,'Απογραφή');ch++}});
  save();countVals={};render();toast(ch?'Διορθώθηκαν '+ch+' είδη':'Όλα σωστά ✓')}
-function stockText(){let t='ΑΠΟΘΗΚΗ — '+dGR(today())+'\n';S.cats.forEach(c=>{const its=catItems(c.id,'').filter(shownInShare);if(!its.length)return;t+='\n'+c.name.toUpperCase()+'\n';its.filter(shownInShare).forEach(i=>t+=`• ${i.name}: ${qtyTxt(i,i.stock)} (${eur(val(i,Math.max(0,i.stock)))})\n`)});return t+'\nΣΥΝΟΛΙΚΗ ΑΞΙΑ: '+eur(stockValue())}
-function printStock(){let h=`<h1>Αποθήκη — ${dGR(today())}</h1><table><tr><th>Κατηγορία</th><th>Είδος</th><th>Συσκευασία</th><th class="r">Απόθεμα</th><th class="r">Τιμή</th><th class="r">Αξία</th><th>Μέτρηση</th></tr>`;
- S.cats.forEach(c=>catItems(c.id,'').filter(shownInShare).forEach(i=>h+=`<tr><td>${esc(c.name)}</td><td>${esc(i.name)}</td><td>${esc(i.pack)}</td><td class="r">${qtyTxt(i,i.stock)}</td><td class="r">${priceLbl(i)}</td><td class="r">${eur(val(i,Math.max(0,i.stock)))}</td><td style="width:70px"></td></tr>`));
- h+=`<tr><td colspan="5"><b>ΣΥΝΟΛΟ</b></td><td class="r"><b>${eur(stockValue())}</b></td><td></td></tr></table>`;$('#print').innerHTML=h;closeModal();setTimeout(()=>window.print(),80)}
 
 // ---------- SETTINGS ----------
 function rSet(){
  $('#main').innerHTML=`
+ <div class="card"><b>Στοιχεία για τα PDF</b><div class="note">Εμφανίζονται πάνω πάνω σε κάθε PDF (αποθήκη, παραγγελίες, μήνας).</div>
+ <label>Όνομα / επωνυμία</label><input data-biz="name" value="${esc(S.biz.name)}" placeholder="Αποθήκη Τροφίμων">
+ <label>Τηλέφωνο</label><input data-biz="phone" inputmode="tel" value="${esc(S.biz.phone)}">
+ <label>Διεύθυνση / email</label><input data-biz="addr" value="${esc(S.biz.addr)}"></div>
  <div class="card"><b>Κατηγορίες</b>
  ${S.cats.map(c=>`<div class="li"><span>${esc(c.name)} <small style="color:var(--mut)">(${S.items.filter(i=>i.catId===c.id).length})</small></span><button class="btn sec sm" data-act="cUp" data-id="${c.id}">▲</button><button class="btn sec sm" data-act="cRen" data-id="${c.id}">Μετονομασία</button><button class="btn red sm" data-act="cDel" data-id="${c.id}">✕</button></div>`).join('')}
  <button class="btn full" style="margin-top:10px" data-act="cAdd">+ Νέα κατηγορία</button></div>
@@ -442,13 +539,14 @@ function rSet(){
  <button class="btn sec full" style="margin-top:10px" data-act="pAdd">+ Νέο άτομο</button></div>
  <div class="card"><b>Αντίγραφο ασφαλείας</b><div class="note">Τα δεδομένα μένουν μόνο σε αυτό το κινητό. Η εφαρμογή σού το θυμίζει μία φορά την εβδομάδα.<br>Τελευταίο αντίγραφο: <b>${ago(S.lastBackup)}</b></div>
  <div class="row"><button class="btn sp" data-act="exp">⬇ Εξαγωγή</button><button class="btn sec sp" data-act="imp">⬆ Επαναφορά</button></div></div>
- <div class="card"><button class="btn red full" data-act="wipe">Διαγραφή όλων των δεδομένων</button><div class="note" style="text-align:center;margin-top:10px">Αποθήκη Τροφίμων · v1.1</div></div>`;
+ <div class="card"><button class="btn red full" data-act="wipe">Διαγραφή όλων των δεδομένων</button><div class="note" style="text-align:center;margin-top:10px">Αποθήκη Τροφίμων · v1.2</div></div>`;
+ document.querySelectorAll('[data-biz]').forEach(i=>i.oninput=()=>{S.biz[i.dataset.biz]=i.value;save()});
 }
 function exportData(){const txt=JSON.stringify(S,null,1);const name='apothiki-'+today()+'.json';
  try{const f=new File([txt],name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f],title:name}).then(()=>{backupDone();toast('Το αντίγραφο στάλθηκε ✓')}).catch(()=>{});return}}catch(e){}
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/json'}));a.download=name;document.body.appendChild(a);a.click();a.remove();backupDone();toast('Αποθηκεύτηκε '+name)}
 $('#impfile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.cats||!d.items)throw 0;if(confirm('Να αντικατασταθούν τα τωρινά δεδομένα με το αντίγραφο;')){S=d;load2();save();render();toast('Έγινε επαναφορά')}}catch(x){alert('Μη έγκυρο αρχείο')}e.target.value=''};r.readAsText(f)};
-function load2(){['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]})}
+function load2(){['cats','items','people','deliveries','moves'].forEach(k=>{if(!Array.isArray(S[k]))S[k]=[]});if(!S.biz)S.biz={name:'',phone:'',addr:''}}
 
 // ---------- actions ----------
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act,id=el.dataset.id;
@@ -463,10 +561,11 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
   case'finishGive':finishGive();break;
   case'hseg':histSeg=el.dataset.s;rHist();break;
   case'showDel':showDelivery(S.deliveries.find(d=>d.id===id));break;
-  case'shareMonth':shareMonth(el.dataset.k);break;
+  case'shareMonth':monthPDF(el.dataset.k);break;
   case'saveCount':saveCount();break;
-  case'printStock':printStock();break;
-  case'shareStock':share(stockText());break;
+  case'stockPDF':stockPDF();break;
+  case'sharePDF':sharePDF();break;
+  case'openPDF':openPDF();break;
   case'cAdd':{const n=prompt('Όνομα νέας κατηγορίας:');if(n&&n.trim()){S.cats.push({id:uid(),name:n.trim()});save();render()}break}
   case'cRen':{const c=cat(id),n=prompt('Νέο όνομα:',c.name);if(n&&n.trim()){c.name=n.trim();save();render()}break}
   case'cUp':{const ix=S.cats.findIndex(c=>c.id===id);if(ix>0){[S.cats[ix-1],S.cats[ix]]=[S.cats[ix],S.cats[ix-1]];save();render()}break}
@@ -475,7 +574,6 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
   case'pDel':{const ix=+el.dataset.ix;if(confirm('Διαγραφή «'+S.people[ix]+'» από τη λίστα; (Το ιστορικό μένει)')){S.people.splice(ix,1);save();render()}break}
   case'exp':exportData();break;
   case'snooze':S.snoozeUntil=Date.now()+DAY;save();rBanner();toast('Θα σου το θυμίσω αύριο');break;
-  case'shareMenu':shareMenu();break;
   case'imp':$('#impfile').click();break;
   case'wipe':if(confirm('Θα σβηστούν ΟΛΑ (είδη, ιστορικό, άτομα). Σίγουρα;')&&confirm('Τελευταία επιβεβαίωση: διαγραφή όλων;')){S=seed();save();cart={};render();toast('Διαγράφηκαν')}break;
  }});
